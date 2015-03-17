@@ -25,17 +25,18 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.Admin;
-import org.apache.hadoop.hbase.client.Connection;
-import org.apache.hadoop.hbase.client.ConnectionFactory;
+import org.apache.hadoop.hbase.client.HBaseAdmin;
+import org.apache.hadoop.hbase.client.HConnection;
+import org.apache.hadoop.hbase.client.HConnectionManager;
+import org.apache.hadoop.hbase.client.HTableInterface;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
-import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,10 +45,7 @@ public class HBaseTest {
   private static final Logger log = LoggerFactory.getLogger(HBaseTest.class);
 
   public static void main(String[] args) throws Exception {
-    Configuration conf = new Configuration(false);
-    conf.addResource("/usr/local/lib/hadoop/etc/hadoop/core-site.xml");
-    conf.addResource("/usr/local/lib/hadoop/etc/hadoop/hdfs-site.xml");
-    conf.addResource("/usr/local/lib/hbase/conf/hbase-site.xml");
+    Configuration conf = HBaseConfiguration.create();
 
     final boolean NUKE_TABLE = true, WRITE_DATA = true, READ_DATA = true;
     final int NUM_ROWS = 1000 * 1000;
@@ -55,33 +53,39 @@ public class HBaseTest {
     long entriesWritten = 0;
     final byte[] cf = "cf".getBytes();
 
-    Connection conn = ConnectionFactory.createConnection(conf);
-    Admin admin = conn.getAdmin();
-    Set<TableName> tables = new HashSet<>(Arrays.asList(admin.listTableNames()));
+    HConnection conn = HConnectionManager.createConnection(conf);
+    HBaseAdmin admin = new HBaseAdmin(conf);
+    Set<TableName> tables = new HashSet<>();
     TreeSet<Integer> rowsWritten = new TreeSet<>();
     TableName tableName = TableName.valueOf("test");
 
-    if (NUKE_TABLE) {
-      // Disable+delete the table if it exists
-      if (tables.contains(tableName)) {
-        admin.disableTable(tableName);
-        admin.deleteTable(tableName);
-      }
+    try {
+      tables.addAll(Arrays.asList(admin.listTableNames()));
 
-      // create the table
-      HTableDescriptor tableDesc = new HTableDescriptor(tableName);
-      tableDesc.addFamily(new HColumnDescriptor(cf));
-      byte[][] splits = new byte[9][2];
-      for (int i = 1; i < 10; i++) {
-        int split = 48 + i;
-        splits[i - 1][0] = (byte) (split >>> 8);
-        splits[i - 1][0] = (byte) (split);
+      if (NUKE_TABLE) {
+        // Disable+delete the table if it exists
+        if (tables.contains(tableName)) {
+          admin.disableTable(tableName);
+          admin.deleteTable(tableName);
+        }
+
+        // create the table
+        HTableDescriptor tableDesc = new HTableDescriptor(tableName);
+        tableDesc.addFamily(new HColumnDescriptor(cf));
+        byte[][] splits = new byte[9][2];
+        for (int i = 1; i < 10; i++) {
+          int split = 48 + i;
+          splits[i - 1][0] = (byte) (split >>> 8);
+          splits[i - 1][0] = (byte) (split);
+        }
+        admin.createTable(tableDesc, splits);
       }
-      admin.createTable(tableDesc, splits);
+    } finally {
+      admin.close();
     }
 
     if (WRITE_DATA) {
-      try (Table table = conn.getTable(tableName)) {
+      try (HTableInterface table = conn.getTable(tableName)) {
         table.setWriteBufferSize(1024 * 1024 * 50);
         System.out.println("Write buffer size: " + table.getWriteBufferSize());
 
@@ -93,7 +97,7 @@ public class HBaseTest {
           for (int j = 0; j < NUM_COLS; j++) {
             byte[] value = new byte[50];
             Bytes.random(value);
-            p.addColumn(cf, Integer.toString(j).getBytes(), value);
+            p.add(cf, Integer.toString(j).getBytes(), value);
           }
           puts.add(p);
 
@@ -133,7 +137,7 @@ public class HBaseTest {
     }
 
     if (READ_DATA) {
-      try (Table table = conn.getTable(tableName)) {
+      try (HTableInterface table = conn.getTable(tableName)) {
         TreeSet<Integer> rows = new TreeSet<>();
         long rowsObserved = 0l;
         long entriesObserved = 0l;
