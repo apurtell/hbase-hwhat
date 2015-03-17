@@ -143,7 +143,8 @@ public class HBaseTest {
         long entriesObserved = 0l;
         Scan s = new Scan();
         s.addFamily(cf);
-        s.setMaxResultSize(-1);
+        s.setMaxResultSize(2 * 1024 * 1024);
+        s.setCaching(Integer.MAX_VALUE);
         s.setBatch(-1);
         ResultScanner scanner = table.getScanner(s);
         String row = null;
